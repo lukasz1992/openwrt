@@ -1,0 +1,26 @@
+diff --git a/mt7915/init.c b/mt7915/init.c
+index 4fe0566d..f8fa4272 100644
+--- a/mt7915/init.c
++++ b/mt7915/init.c
+@@ -13,17 +13,16 @@
+ 
+ static const struct ieee80211_iface_limit if_limits[] = {
+ 	{
+-		.max = 1,
+-		.types = BIT(NL80211_IFTYPE_ADHOC)
+-	}, {
+ 		.max = 16,
+-		.types = BIT(NL80211_IFTYPE_AP)
++		.types = BIT(NL80211_IFTYPE_AP) |
++			 BIT(NL80211_IFTYPE_P2P_GO)
+ #ifdef CONFIG_MAC80211_MESH
+ 			 | BIT(NL80211_IFTYPE_MESH_POINT)
+ #endif
+ 	}, {
+ 		.max = MT7915_MAX_INTERFACES,
+-		.types = BIT(NL80211_IFTYPE_STATION)
++		.types = BIT(NL80211_IFTYPE_STATION) |
++			 BIT(NL80211_IFTYPE_P2P_CLIENT)
+ 	}
+ };
+ 

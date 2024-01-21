@@ -1,0 +1,20 @@
+commit 84483e2df75df0db4632bb1c4419f61587cb34de
+Author: rany <ranygh@riseup.net>
+Date:   Tue Jun 6 16:52:52 2023 +0300
+
+    wifi: mt76: mt7915: fix missing MT_INT1_SOURCE_CSR in hif2 init
+    
+    Signed-off-by: rany <ranygh@riseup.net>
+
+diff --git a/mt7915/pci.c b/mt7915/pci.c
+index 39132894..87016f23 100644
+--- a/mt7915/pci.c
++++ b/mt7915/pci.c
+@@ -162,6 +162,7 @@ static int mt7915_pci_probe(struct pci_dev *pdev,
+ 		dev->hif2 = hif2;
+ 
+ 		mt76_wr(dev, MT_INT1_MASK_CSR, 0);
++		mt76_wr(dev, MT_INT1_SOURCE_CSR, ~0);
+ 		/* master switch of PCIe tnterrupt enable */
+ 		if (is_mt7915(mdev))
+ 			mt76_wr(dev, MT_PCIE1_MAC_INT_ENABLE, 0xff);

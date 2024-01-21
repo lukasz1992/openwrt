@@ -421,7 +421,7 @@ $(eval $(call KernelPackage,crypto-hw-padlock))
 define KernelPackage/crypto-hw-safexcel
   TITLE:= MVEBU SafeXcel Crypto Engine module
   DEPENDS:=@(TARGET_mvebu_cortexa53||TARGET_mvebu_cortexa72||TARGET_mediatek_filogic||TARGET_mediatek_mt7623) \
-	+eip197-mini-firmware +kmod-crypto-authenc +kmod-crypto-des +kmod-crypto-md5 +kmod-crypto-hmac \
+	+kmod-crypto-authenc +kmod-crypto-des +kmod-crypto-md5 +kmod-crypto-hmac \
 	+kmod-crypto-sha1 +kmod-crypto-sha256 +kmod-crypto-sha512
   KCONFIG:= \
 	CONFIG_CRYPTO_HW=y \
@@ -463,6 +463,35 @@ endef
 
 $(eval $(call KernelPackage,crypto-hw-talitos))
 
+define KernelPackage/crypto-hw-eip93
+  TITLE:=MTK EIP93 crypto module
+  DEPENDS:=@TARGET_ramips_mt7621 \
+	+kmod-crypto-authenc \
+	+kmod-crypto-des \
+	+kmod-crypto-md5 \
+	+kmod-crypto-sha1 \
+	+kmod-crypto-sha256
+  KCONFIG:= \
+	CONFIG_CRYPTO_HW=y \
+	CONFIG_CRYPTO_DEV_EIP93 \
+	CONFIG_CRYPTO_DEV_EIP93_AES=y \
+	CONFIG_CRYPTO_DEV_EIP93_DES=y \
+	CONFIG_CRYPTO_DEV_EIP93_AEAD=y \
+	CONFIG_CRYPTO_DEV_EIP93_GENERIC_SW_MAX_LEN=256 \
+	CONFIG_CRYPTO_DEV_EIP93_AES_128_SW_MAX_LEN=512
+  FILES:=$(LINUX_DIR)/drivers/crypto/mtk-eip93/crypto-hw-eip93.ko
+  AUTOLOAD:=$(call AutoLoad,09,crypto-hw-eip93)
+  $(call AddDepends/crypto)
+endef
+
+define KernelPackage/crypto-hw-eip93/description
+Kernel module to enable EIP-93 Crypto engine as found
+in the Mediatek MT7621 SoC.
+It enables DES/3DES/AES ECB/CBC/CTR and
+IPSEC offload with authenc(hmac(sha1/sha256), aes/cbc/rfc3686)
+endef
+
+$(eval $(call KernelPackage,crypto-hw-eip93))
 
 define KernelPackage/crypto-kpp
   TITLE:=Key-agreement Protocol Primitives
