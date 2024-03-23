@@ -1,0 +1,12 @@
+diff --git a/mt7915/pci.c b/mt7915/pci.c
+index 87016f23..07355b37 100644
+--- a/mt7915/pci.c
++++ b/mt7915/pci.c
+@@ -141,7 +141,6 @@ static int mt7915_pci_probe(struct pci_dev *pdev,
+ 		goto free_wed_or_irq_vector;
+ 
+ 	if (!ret) {
+-		hif2 = mt7915_pci_init_hif2(pdev);
+ 
+ 		ret = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
+ 		if (ret < 0)

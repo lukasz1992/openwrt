@@ -1,0 +1,227 @@
+commit a171be1e95a8d75908ee451fb3522d6827f580cf
+Author: Felix Fietkau <nbd@nbd.name>
+Date:   Wed Jun 26 18:42:25 2024 +0200
+
+    wifi: mt76: add separate tx scheduling queue for off-channel tx
+    
+    Ensure that packets are not sent out to the wrong channel
+    
+    Signed-off-by: Felix Fietkau <nbd@nbd.name>
+
+diff --git a/mac80211.c b/mac80211.c
+index 19959ca8..112c6f44 100644
+--- a/mac80211.c
++++ b/mac80211.c
+@@ -933,8 +933,7 @@ int mt76_set_channel(struct mt76_phy *phy, struct cfg80211_chan_def *chandef,
+ 	mutex_lock(&dev->mutex);
+ 	set_bit(MT76_RESET, &phy->state);
+ 
+-	ieee80211_stop_queues(phy->hw);
+-
++	mt76_worker_disable(&dev->tx_worker);
+ 	wait_event_timeout(dev->tx_wait, !mt76_has_tx_pending(phy), timeout);
+ 	mt76_update_survey(phy);
+ 
+@@ -951,12 +950,11 @@ int mt76_set_channel(struct mt76_phy *phy, struct cfg80211_chan_def *chandef,
+ 
+ 	if (chandef->chan != phy->main_chan)
+ 		memset(phy->chan_state, 0, sizeof(*phy->chan_state));
++	mt76_worker_enable(&dev->tx_worker);
+ 
+ 	ret = dev->drv->set_channel(phy);
+ 
+ 	clear_bit(MT76_RESET, &phy->state);
+-	ieee80211_wake_queues(phy->hw);
+-
+ 	mt76_worker_schedule(&dev->tx_worker);
+ 
+ 	mutex_unlock(&dev->mutex);
+@@ -1552,6 +1550,7 @@ void mt76_wcid_init(struct mt76_wcid *wcid)
+ {
+ 	INIT_LIST_HEAD(&wcid->tx_list);
+ 	skb_queue_head_init(&wcid->tx_pending);
++	skb_queue_head_init(&wcid->tx_offchannel);
+ 
+ 	INIT_LIST_HEAD(&wcid->list);
+ 	idr_init(&wcid->pktid);
+diff --git a/mt76.h b/mt76.h
+index e5f31bdf..1f7f1f2a 100644
+--- a/mt76.h
++++ b/mt76.h
+@@ -365,6 +365,7 @@ struct mt76_wcid {
+ 
+ 	struct list_head tx_list;
+ 	struct sk_buff_head tx_pending;
++	struct sk_buff_head tx_offchannel;
+ 
+ 	struct list_head list;
+ 	struct idr pktid;
+diff --git a/tx.c b/tx.c
+index 739b1f39..5f6fb5e3 100644
+--- a/tx.c
++++ b/tx.c
+@@ -333,6 +333,7 @@ mt76_tx(struct mt76_phy *phy, struct ieee80211_sta *sta,
+ 	struct mt76_wcid *wcid, struct sk_buff *skb)
+ {
+ 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
++	struct sk_buff_head *head;
+ 
+ 	if (mt76_testmode_enabled(phy)) {
+ 		ieee80211_free_txskb(phy->hw, skb);
+@@ -348,9 +349,15 @@ mt76_tx(struct mt76_phy *phy, struct ieee80211_sta *sta,
+ 
+ 	info->hw_queue |= FIELD_PREP(MT_TX_HW_QUEUE_PHY, phy->band_idx);
+ 
+-	spin_lock_bh(&wcid->tx_pending.lock);
+-	__skb_queue_tail(&wcid->tx_pending, skb);
+-	spin_unlock_bh(&wcid->tx_pending.lock);
++	if ((info->flags & IEEE80211_TX_CTL_TX_OFFCHAN) ||
++	    (info->control.flags & IEEE80211_TX_CTRL_SCAN_TX))
++		head = &wcid->tx_offchannel;
++	else
++		head = &wcid->tx_pending;
++
++	spin_lock_bh(&head->lock);
++	__skb_queue_tail(head, skb);
++	spin_unlock_bh(&head->lock);
+ 
+ 	spin_lock_bh(&phy->tx_lock);
+ 	if (list_empty(&wcid->tx_list))
+@@ -481,7 +488,7 @@ mt76_txq_send_burst(struct mt76_phy *phy, struct mt76_queue *q,
+ 		return idx;
+ 
+ 	do {
+-		if (test_bit(MT76_RESET, &phy->state))
++		if (test_bit(MT76_RESET, &phy->state) || phy->offchannel)
+ 			return -EBUSY;
+ 
+ 		if (stop || mt76_txq_stopped(q))
+@@ -525,7 +532,7 @@ mt76_txq_schedule_list(struct mt76_phy *phy, enum mt76_txq_id qid)
+ 	while (1) {
+ 		int n_frames = 0;
+ 
+-		if (test_bit(MT76_RESET, &phy->state))
++		if (test_bit(MT76_RESET, &phy->state) || phy->offchannel)
+ 			return -EBUSY;
+ 
+ 		if (dev->queue_ops->tx_cleanup &&
+@@ -571,7 +578,7 @@ void mt76_txq_schedule(struct mt76_phy *phy, enum mt76_txq_id qid)
+ {
+ 	int len;
+ 
+-	if (qid >= 4)
++	if (qid >= 4 || phy->offchannel)
+ 		return;
+ 
+ 	local_bh_disable();
+@@ -589,7 +596,8 @@ void mt76_txq_schedule(struct mt76_phy *phy, enum mt76_txq_id qid)
+ EXPORT_SYMBOL_GPL(mt76_txq_schedule);
+ 
+ static int
+-mt76_txq_schedule_pending_wcid(struct mt76_phy *phy, struct mt76_wcid *wcid)
++mt76_txq_schedule_pending_wcid(struct mt76_phy *phy, struct mt76_wcid *wcid,
++			       struct sk_buff_head *head)
+ {
+ 	struct mt76_dev *dev = phy->dev;
+ 	struct ieee80211_sta *sta;
+@@ -597,8 +605,8 @@ mt76_txq_schedule_pending_wcid(struct mt76_phy *phy, struct mt76_wcid *wcid)
+ 	struct sk_buff *skb;
+ 	int ret = 0;
+ 
+-	spin_lock(&wcid->tx_pending.lock);
+-	while ((skb = skb_peek(&wcid->tx_pending)) != NULL) {
++	spin_lock(&head->lock);
++	while ((skb = skb_peek(head)) != NULL) {
+ 		struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
+ 		struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+ 		int qid = skb_get_queue_mapping(skb);
+@@ -610,13 +618,13 @@ mt76_txq_schedule_pending_wcid(struct mt76_phy *phy, struct mt76_wcid *wcid)
+ 			qid = MT_TXQ_PSD;
+ 
+ 		q = phy->q_tx[qid];
+-		if (mt76_txq_stopped(q)) {
++		if (mt76_txq_stopped(q) || test_bit(MT76_RESET, &phy->state)) {
+ 			ret = -1;
+ 			break;
+ 		}
+ 
+-		__skb_unlink(skb, &wcid->tx_pending);
+-		spin_unlock(&wcid->tx_pending.lock);
++		__skb_unlink(skb, head);
++		spin_unlock(&head->lock);
+ 
+ 		sta = wcid_to_sta(wcid);
+ 		spin_lock(&q->lock);
+@@ -624,38 +632,61 @@ mt76_txq_schedule_pending_wcid(struct mt76_phy *phy, struct mt76_wcid *wcid)
+ 		dev->queue_ops->kick(dev, q);
+ 		spin_unlock(&q->lock);
+ 
+-		spin_lock(&wcid->tx_pending.lock);
++		spin_lock(&head->lock);
+ 	}
+-	spin_unlock(&wcid->tx_pending.lock);
++	spin_unlock(&head->lock);
+ 
+ 	return ret;
+ }
+ 
++static void
++mt76_txq_free_wcid_offchannel(struct mt76_phy *phy, struct mt76_wcid *wcid)
++{
++	struct sk_buff_head *head = &wcid->tx_offchannel;
++	struct ieee80211_hw *hw = phy->hw;
++	struct sk_buff *skb;
++
++	spin_lock(&head->lock);
++	while ((skb = __skb_dequeue(head)) != NULL)
++		ieee80211_free_txskb(hw, skb);
++	spin_unlock(&head->lock);
++}
++
+ static void mt76_txq_schedule_pending(struct mt76_phy *phy)
+ {
+-	if (list_empty(&phy->tx_list))
++	LIST_HEAD(tx_list);
++
++	if (list_empty(&phy->tx_list) || phy->offchannel)
+ 		return;
+ 
+ 	local_bh_disable();
+ 	rcu_read_lock();
+ 
+ 	spin_lock(&phy->tx_lock);
+-	while (!list_empty(&phy->tx_list)) {
+-		struct mt76_wcid *wcid = NULL;
++	list_splice_init(&phy->tx_list, &tx_list);
++	while (!list_empty(&tx_list)) {
++		struct sk_buff_head *head;
++		struct mt76_wcid *wcid;
+ 		int ret;
+ 
+-		wcid = list_first_entry(&phy->tx_list, struct mt76_wcid, tx_list);
++		wcid = list_first_entry(&tx_list, struct mt76_wcid, tx_list);
+ 		list_del_init(&wcid->tx_list);
+ 
+ 		spin_unlock(&phy->tx_lock);
+-		ret = mt76_txq_schedule_pending_wcid(phy, wcid);
++		if (!phy->offchannel)
++			mt76_txq_free_wcid_offchannel(phy, wcid);
++		head = phy->offchannel ? &wcid->tx_offchannel : &wcid->tx_pending;
++		ret = mt76_txq_schedule_pending_wcid(phy, wcid, head);
+ 		spin_lock(&phy->tx_lock);
+ 
+-		if (ret) {
+-			if (list_empty(&wcid->tx_list))
+-				list_add_tail(&wcid->tx_list, &phy->tx_list);
++		if (skb_queue_empty(&wcid->tx_pending) &&
++		    skb_queue_empty(&wcid->tx_offchannel))
++			continue;
++
++		if (list_empty(&wcid->tx_list))
++			list_add_tail(&wcid->tx_list, &phy->tx_list);
++		if (ret < 0)
+ 			break;
+-		}
+ 	}
+ 	spin_unlock(&phy->tx_lock);
+ 

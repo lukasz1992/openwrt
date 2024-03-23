@@ -1,0 +1,82 @@
+commit bf6439a35d2a27d9381c4b8ebc39b89e32295420
+Author: lukasz <lukasz@example.com>
+Date:   Sat Mar 23 12:45:32 2024 +0100
+
+    lock TXQ when altering block-ack settings
+
+diff --git a/mt7915/mcu.c b/mt7915/mcu.c
+index fe54a2f4..cb7d54d0 100644
+--- a/mt7915/mcu.c
++++ b/mt7915/mcu.c
+@@ -683,32 +683,61 @@ out:
+ 				     MCU_EXT_CMD(BSS_INFO_UPDATE), true);
+ }
+ 
++int mt7915_mcu_add_ba(struct mt7915_dev *dev,
++			     struct ieee80211_ampdu_params *params,
++			     bool enable,
++			     bool tx)
++{
++	struct mt7915_sta *msta = (struct mt7915_sta *)params->sta->drv_priv;
++	struct mt7915_vif *mvif = msta->vif;
++	struct mt76_phy *pri_phy = dev->mt76.phys[MT_BAND0];
++	struct mt76_phy *ext_phy = dev->mt76.phys[MT_BAND1];
++	int ret;
++
++	/* lock/unlock all queues to ensure that no tx is pending */
++	mt76_txq_schedule_all(pri_phy);
++	if (ext_phy)
++		mt76_txq_schedule_all(ext_phy);
++
++	/* disable tx worker and napi */
++	mt76_worker_disable(&dev->mt76.tx_worker);
++	napi_disable(&dev->mt76.tx_napi);
++
++	/* send BA update */
++	ret = mt76_connac_mcu_sta_ba(&dev->mt76, &mvif->mt76, params,
++				      MCU_EXT_CMD(STA_REC_UPDATE),
++				      enable, tx);
++
++	/* re-enable tx napi */
++	local_bh_disable();
++	napi_enable(&dev->mt76.tx_napi);
++	napi_schedule(&dev->mt76.tx_napi);
++	local_bh_enable();
++
++	/* enable tx worker */
++	mt76_worker_enable(&dev->mt76.tx_worker);
++
++	return ret;
++}
++
+ /** starec & wtbl **/
+ int mt7915_mcu_add_tx_ba(struct mt7915_dev *dev,
+ 			 struct ieee80211_ampdu_params *params,
+ 			 bool enable)
+ {
+ 	struct mt7915_sta *msta = (struct mt7915_sta *)params->sta->drv_priv;
+-	struct mt7915_vif *mvif = msta->vif;
+ 
+ 	if (enable && !params->amsdu)
+ 		msta->wcid.amsdu = false;
+ 
+-	return mt76_connac_mcu_sta_ba(&dev->mt76, &mvif->mt76, params,
+-				      MCU_EXT_CMD(STA_REC_UPDATE),
+-				      enable, true);
++	return mt7915_mcu_add_ba(dev, params, enable, true);
+ }
+ 
+ int mt7915_mcu_add_rx_ba(struct mt7915_dev *dev,
+ 			 struct ieee80211_ampdu_params *params,
+ 			 bool enable)
+ {
+-	struct mt7915_sta *msta = (struct mt7915_sta *)params->sta->drv_priv;
+-	struct mt7915_vif *mvif = msta->vif;
+-
+-	return mt76_connac_mcu_sta_ba(&dev->mt76, &mvif->mt76, params,
+-				      MCU_EXT_CMD(STA_REC_UPDATE),
+-				      enable, false);
++	return mt7915_mcu_add_ba(dev, params, enable, false);
+ }
+ 
+ static void
