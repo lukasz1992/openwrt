@@ -1,0 +1,73 @@
+commit 2248d095a8e1fd27ed00b927a31f50dafbd75a86
+Author: lukasz <lukasz@example.com>
+Date:   Sun Nov 3 18:49:22 2024 +0100
+
+    111
+
+--- a/mt7915/mcu.c
++++ b/mt7915/mcu.c
+@@ -572,6 +572,8 @@ mt7915_mcu_bss_he_tlv(struct sk_buff *sk
+ 	struct tlv *tlv;
+ 
+ 	cap = mt76_connac_get_he_phy_cap(phy->mt76, vif);
++	if (!cap)
++		return;
+ 
+ 	tlv = mt76_connac_mcu_add_tlv(skb, BSS_INFO_HE_BASIC, sizeof(*he));
+ 
+@@ -1161,11 +1163,15 @@ mt7915_mcu_sta_bfer_he(struct ieee80211_
+ 	struct ieee80211_he_cap_elem *pe = &pc->he_cap_elem;
+ 	const struct ieee80211_sta_he_cap *vc =
+ 		mt76_connac_get_he_phy_cap(phy->mt76, vif);
+-	const struct ieee80211_he_cap_elem *ve = &vc->he_cap_elem;
++	const struct ieee80211_he_cap_elem *ve;
+ 	u16 mcs_map = le16_to_cpu(pc->he_mcs_nss_supp.rx_mcs_80);
+ 	u8 nss_mcs = mt7915_mcu_get_sta_nss(mcs_map);
+ 	u8 snd_dim, sts;
+ 
++	if (!vc)
++		return;
++	ve = &vc->he_cap_elem;
++
+ 	bf->tx_mode = MT_PHY_TYPE_HE_SU;
+ 
+ 	mt7915_mcu_sta_sounding_rate(bf);
+--- a/mt7925/mcu.c
++++ b/mt7925/mcu.c
+@@ -2170,6 +2170,8 @@ mt7925_mcu_bss_he_tlv(struct sk_buff *sk
+ 	struct tlv *tlv;
+ 
+ 	cap = mt76_connac_get_he_phy_cap(phy->mt76, vif);
++	if (!cap)
++		return;
+ 
+ 	tlv = mt76_connac_mcu_add_tlv(skb, UNI_BSS_INFO_HE_BASIC, sizeof(*he));
+ 
+--- a/mt7996/mcu.c
++++ b/mt7996/mcu.c
+@@ -810,6 +810,8 @@ mt7996_mcu_bss_he_tlv(struct sk_buff *sk
+ 	struct tlv *tlv;
+ 
+ 	cap = mt76_connac_get_he_phy_cap(phy->mt76, vif);
++	if (!cap)
++		return;
+ 
+ 	tlv = mt7996_mcu_add_uni_tlv(skb, UNI_BSS_INFO_HE_BASIC, sizeof(*he));
+ 
+@@ -1551,11 +1553,15 @@ mt7996_mcu_sta_bfer_he(struct ieee80211_
+ 	struct ieee80211_he_cap_elem *pe = &pc->he_cap_elem;
+ 	const struct ieee80211_sta_he_cap *vc =
+ 		mt76_connac_get_he_phy_cap(phy->mt76, vif);
+-	const struct ieee80211_he_cap_elem *ve = &vc->he_cap_elem;
++	const struct ieee80211_he_cap_elem *ve;
+ 	u16 mcs_map = le16_to_cpu(pc->he_mcs_nss_supp.rx_mcs_80);
+ 	u8 nss_mcs = mt7996_mcu_get_sta_nss(mcs_map);
+ 	u8 snd_dim, sts;
+ 
++	if (!vc)
++		return;
++	ve = &vc->he_cap_elem;
++
+ 	bf->tx_mode = MT_PHY_TYPE_HE_SU;
+ 
+ 	mt7996_mcu_sta_sounding_rate(bf);

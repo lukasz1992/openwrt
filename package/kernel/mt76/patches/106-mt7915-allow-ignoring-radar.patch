@@ -1,0 +1,50 @@
+commit 786930155b7a6ea7bcfae29d037dab3444a31889
+Author: lukasz <lukasz@example.com>
+Date:   Sat Mar 23 12:52:19 2024 +0100
+
+    Allow to ignore radar
+
+--- a/mt7915/debugfs.c
++++ b/mt7915/debugfs.c
+@@ -1237,6 +1237,8 @@ int mt7915_init_debugfs(struct mt7915_ph
+ 	debugfs_create_devm_seqfile(dev->mt76.dev, "twt_stats", dir,
+ 				    mt7915_twt_stats);
+ 	debugfs_create_file("rf_regval", 0600, dir, dev, &fops_rf_regval);
++	debugfs_create_u32("ignore_radar", 0600, dir,
++			   &dev->ignore_radar);
+ 
+ 	if (!dev->dbdc_support || phy->mt76->band_idx) {
+ 		debugfs_create_u32("dfs_hw_pattern", 0400, dir,
+--- a/mt7915/mcu.c
++++ b/mt7915/mcu.c
+@@ -313,12 +313,14 @@ mt7915_mcu_rx_radar_detected(struct mt79
+ 	    dev->mt76.phys[MT_BAND1])
+ 		mphy = dev->mt76.phys[MT_BAND1];
+ 
+-	if (r->band_idx == MT_RX_SEL2)
+-		cfg80211_background_radar_event(mphy->hw->wiphy,
+-						&dev->rdd2_chandef,
+-						GFP_ATOMIC);
+-	else
+-		ieee80211_radar_detected(mphy->hw);
++	if (!dev->ignore_radar) {
++		if (r->band_idx == MT_RX_SEL2)
++			cfg80211_background_radar_event(mphy->hw->wiphy,
++							&dev->rdd2_chandef,
++							GFP_ATOMIC);
++		else
++			ieee80211_radar_detected(mphy->hw);
++	}
+ 	dev->hw_pattern++;
+ }
+ 
+--- a/mt7915/mt7915.h
++++ b/mt7915/mt7915.h
+@@ -291,6 +291,7 @@ struct mt7915_dev {
+ 	spinlock_t reg_lock;
+ 
+ 	u32 hw_pattern;
++	u32 ignore_radar; /* skip propagating up the stack, for debugging */
+ 
+ 	bool dbdc_support;
+ 	bool flash_mode;
