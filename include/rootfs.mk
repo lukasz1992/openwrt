@@ -95,6 +95,7 @@ define prepare_rootfs
 		$(1)/usr/lib/opkg/info/*.postinst* \
 		$(1)/usr/lib/opkg/lists/* \
 		$(1)/var/lock/*.lock
+	sed 's/5.15.167-1-................................/5.15.167-1-03ba5b5fee47f2232a088e3cd9832aec/g' -i $(1)/usr/lib/opkg/status
 	$(call clean_ipkg,$(1))
 	$(call mklibs,$(1))
 	$(if $(SOURCE_DATE_EPOCH),find $(1)/ -mindepth 1 -execdir touch -hcd "@$(SOURCE_DATE_EPOCH)" "{}" +)
