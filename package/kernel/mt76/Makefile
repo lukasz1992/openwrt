@@ -8,9 +8,9 @@ PKG_LICENSE_FILES:=
 
 PKG_SOURCE_URL:=https://github.com/openwrt/mt76
 PKG_SOURCE_PROTO:=git
-PKG_SOURCE_DATE:=2025-01-14
-PKG_SOURCE_VERSION:=8e4f72b682e9070108536507c5e2720b18c3816d
-PKG_MIRROR_HASH:=fa8c5a2ece9e7287605910d9f906b601711c7863613addaadd666f9e3858a9e7
+PKG_SOURCE_DATE:=2025-03-12
+PKG_SOURCE_VERSION:=d195324131bac83ef76a6699bf284ecfd13fac28
+PKG_MIRROR_HASH:=55f905d6b008ae149f0292b8c7ffcd8f77dd589e8826d9cb663590710401161a
 
 PKG_MAINTAINER:=Felix Fietkau <nbd@nbd.name>
 PKG_USE_NINJA:=0
@@ -596,9 +596,9 @@ endef
 define KernelPackage/mt7915-firmware/install
 	$(INSTALL_DIR) $(1)/lib/firmware/mediatek
 	cp \
-		$(PKG_BUILD_DIR)/firmware/mt7915_wa.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7915_wm.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7915_rom_patch.bin \
+		./files/mt7915_wa.bin \
+		./files/mt7915_wm.bin \
+		./files/mt7915_rom_patch.bin \
 		$(1)/lib/firmware/mediatek
 endef
 
@@ -614,20 +614,20 @@ endef
 define KernelPackage/mt7981-firmware/install
 	$(INSTALL_DIR) $(1)/lib/firmware/mediatek
 	cp \
-		$(PKG_BUILD_DIR)/firmware/mt7981_wa.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7981_wm.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7981_rom_patch.bin \
+		./files/mt7981_wa.bin \
+		./files/mt7981_wm.bin \
+		./files/mt7981_rom_patch.bin \
 		$(1)/lib/firmware/mediatek
 endef
 
 define KernelPackage/mt7986-firmware/install
 	$(INSTALL_DIR) $(1)/lib/firmware/mediatek
 	cp \
-		$(PKG_BUILD_DIR)/firmware/mt7986_wa.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7986_wm_mt7975.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7986_wm.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7986_rom_patch_mt7975.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7986_rom_patch.bin \
+		./files/mt7986_wa.bin \
+		./files/mt7986_wm_mt7975.bin \
+		./files/mt7986_wm.bin \
+		./files/mt7986_rom_patch_mt7975.bin \
+		./files/mt7986_rom_patch.bin \
 		$(1)/lib/firmware/mediatek
 endef
 
