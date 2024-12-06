@@ -1,0 +1,12 @@
+--- a/mt7915/init.c
++++ b/mt7915/init.c
+@@ -231,6 +231,9 @@ static void mt7915_led_set_config(struct
+ 	mphy = container_of(led_cdev, struct mt76_phy, leds.cdev);
+ 	dev = container_of(mphy->dev, struct mt7915_dev, mt76);
+ 
++	/* select TX blink mode, 2: only data frames */
++	mt76_rmw_field(dev, MT_TMAC_TCR0(0), MT_TMAC_TCR0_TX_BLINK, 2);
++
+ 	/* set PWM mode */
+ 	val = FIELD_PREP(MT_LED_STATUS_DURATION, 0xffff) |
+ 	      FIELD_PREP(MT_LED_STATUS_OFF, delay_off) |
