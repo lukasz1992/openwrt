@@ -1,0 +1,29 @@
+commit 45329ceae19fe4dd3de8a5461c338479b6dfc77e
+Author: James Haggerty <james@gruemail.com>
+Date:   Wed Jan 1 22:40:34 2025 +0800
+
+    wifi: mt76: mt7603: fix SMPS command timing in mt7603 driver
+    
+    Ensure SMPS (Spatial Multiplexing Power Save) mode is set after STA
+    (Station) association in the mt7603 driver. The SMPS command was
+    previously applied too early, leading to inconsistent behavior with
+    the iwlwifi station and mt7603 access point. By reapplying the SMPS
+    setting post-association, RTS/CTS (Request to Send/Clear to Send)
+    functions correctly, improving connection stability.
+
+--- a/mt7603/main.c
++++ b/mt7603/main.c
+@@ -358,6 +358,13 @@ mt7603_sta_event(struct mt76_dev *mdev,
+ 		 struct ieee80211_sta *sta, enum mt76_sta_event ev)
+ {
+ 	struct mt7603_dev *dev = container_of(mdev, struct mt7603_dev, mt76);
++	struct mt7603_sta *msta = (struct mt7603_sta *)sta->drv_priv;
++
++	/* Once association has happened, we need to make sure that the SMPS
++	 * mode is set again (if it's happened earlier, the firmware seems to forget
++	 * about it, at least in terms of the observed behaviour).
++	 */
++	msta->smps = ~0;
+ 
+ 	if (ev == MT76_STA_EVENT_ASSOC) {
+ 		mutex_lock(&dev->mt76.mutex);
