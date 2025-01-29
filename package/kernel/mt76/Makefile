@@ -596,9 +596,9 @@ endef
 define KernelPackage/mt7915-firmware/install
 	$(INSTALL_DIR) $(1)/lib/firmware/mediatek
 	cp \
-		$(PKG_BUILD_DIR)/firmware/mt7915_wa.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7915_wm.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7915_rom_patch.bin \
+		./files/mt7915_wa.bin \
+		./files/mt7915_wm.bin \
+		./files/mt7915_rom_patch.bin \
 		$(1)/lib/firmware/mediatek
 endef
 
@@ -614,20 +614,20 @@ endef
 define KernelPackage/mt7981-firmware/install
 	$(INSTALL_DIR) $(1)/lib/firmware/mediatek
 	cp \
-		$(PKG_BUILD_DIR)/firmware/mt7981_wa.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7981_wm.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7981_rom_patch.bin \
+		./files/mt7981_wa.bin \
+		./files/mt7981_wm.bin \
+		./files/mt7981_rom_patch.bin \
 		$(1)/lib/firmware/mediatek
 endef
 
 define KernelPackage/mt7986-firmware/install
 	$(INSTALL_DIR) $(1)/lib/firmware/mediatek
 	cp \
-		$(PKG_BUILD_DIR)/firmware/mt7986_wa.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7986_wm_mt7975.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7986_wm.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7986_rom_patch_mt7975.bin \
-		$(PKG_BUILD_DIR)/firmware/mt7986_rom_patch.bin \
+		./files/mt7986_wa.bin \
+		./files/mt7986_wm_mt7975.bin \
+		./files/mt7986_wm.bin \
+		./files/mt7986_rom_patch_mt7975.bin \
+		./files/mt7986_rom_patch.bin \
 		$(1)/lib/firmware/mediatek
 endef
 
