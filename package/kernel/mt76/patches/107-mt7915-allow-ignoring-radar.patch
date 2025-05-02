@@ -1,0 +1,38 @@
+commit 786930155b7a6ea7bcfae29d037dab3444a31889
+Author: lukasz <lukasz@example.com>
+Date:   Sat Mar 23 12:52:19 2024 +0100
+
+    Allow to ignore radar
+
+--- a/mt7915/debugfs.c
++++ b/mt7915/debugfs.c
+@@ -1275,6 +1275,8 @@ int mt7915_init_debugfs(struct mt7915_ph
+ 	debugfs_create_file("rf_regval", 0600, dir, dev, &fops_rf_regval);
+ 	debugfs_create_file("sw_aci", 0600, dir, dev,
+ 			    &fops_sw_aci);
++	debugfs_create_u32("ignore_radar", 0600, dir,
++			   &dev->ignore_radar);
+ 
+ 	if (!dev->dbdc_support || phy->mt76->band_idx) {
+ 		debugfs_create_u32("dfs_hw_pattern", 0400, dir,
+--- a/mt7915/mcu.c
++++ b/mt7915/mcu.c
+@@ -328,7 +328,7 @@ mt7915_mcu_rx_radar_detected(struct mt79
+ 		return;
+ 	}
+ 
+-	if (!mphy)
++	if (!mphy || dev->ignore_radar)
+ 		return;
+ 
+ 	if (r->rdd_idx == MT_RDD_IDX_BACKGROUND)
+--- a/mt7915/mt7915.h
++++ b/mt7915/mt7915.h
+@@ -289,6 +289,7 @@ struct mt7915_dev {
+ 	spinlock_t reg_lock;
+ 
+ 	u32 hw_pattern;
++	u32 ignore_radar; /* skip propagating up the stack, for debugging */
+ 
+ 	bool dbdc_support;
+ 	bool flash_mode;

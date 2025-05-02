@@ -1,0 +1,98 @@
+--- a/mt76_connac_mcu.h
++++ b/mt76_connac_mcu.h
+@@ -1255,6 +1255,7 @@ enum {
+ 	MCU_EXT_CMD_DPD_PRE_CAL_INFO = 0xac,
+ 	MCU_EXT_CMD_PHY_STAT_INFO = 0xad,
+ 	MCU_EXT_CMD_WF_RF_PIN_CTRL = 0xbd,
++	MCU_EXT_CMD_SWLNA_ACI_CTRL = 0xc0,
+ };
+ 
+ enum {
+--- a/mt7915/debugfs.c
++++ b/mt7915/debugfs.c
+@@ -1225,6 +1225,21 @@ mt7915_rf_regval_set(void *data, u64 val
+ DEFINE_DEBUGFS_ATTRIBUTE(fops_rf_regval, mt7915_rf_regval_get,
+ 			 mt7915_rf_regval_set, "0x%08llx\n");
+ 
++static int
++mt7915_sw_aci_set(void *data, u64 val)
++{
++	struct mt7915_dev *dev = data;
++
++	if (val > 1)
++		return -EINVAL;
++
++	return mt7915_mcu_sw_aci_set(dev, !!val);
++}
++
++
++DEFINE_DEBUGFS_ATTRIBUTE(fops_sw_aci, NULL,
++			 mt7915_sw_aci_set, "%llx\n");
++
+ int mt7915_init_debugfs(struct mt7915_phy *phy)
+ {
+ 	struct mt7915_dev *dev = phy->dev;
+@@ -1258,6 +1273,8 @@ int mt7915_init_debugfs(struct mt7915_ph
+ 	debugfs_create_devm_seqfile(dev->mt76.dev, "twt_stats", dir,
+ 				    mt7915_twt_stats);
+ 	debugfs_create_file("rf_regval", 0600, dir, dev, &fops_rf_regval);
++	debugfs_create_file("sw_aci", 0600, dir, dev,
++			    &fops_sw_aci);
+ 
+ 	if (!dev->dbdc_support || phy->mt76->band_idx) {
+ 		debugfs_create_u32("dfs_hw_pattern", 0400, dir,
+--- a/mt7915/main.c
++++ b/mt7915/main.c
+@@ -8,6 +8,10 @@
+ #include "mt7915.h"
+ #include "mcu.h"
+ 
++static bool sw_aci_enable = false;
++module_param(sw_aci_enable, bool, 0644);
++MODULE_PARM_DESC(sw_aci_enable, "Enable the feature of Adjacent Channel Interference Detection");
++
+ static bool mt7915_dev_running(struct mt7915_dev *dev)
+ {
+ 	struct mt7915_phy *phy;
+@@ -41,6 +45,10 @@ int mt7915_run(struct ieee80211_hw *hw)
+ 			goto out;
+ 
+ 		mt7915_mac_enable_nf(dev, dev->phy.mt76->band_idx);
++
++		ret = mt7915_mcu_sw_aci_set(dev, sw_aci_enable);
++		if (ret)
++			goto out;
+ 	}
+ 
+ 	if (phy != &dev->phy) {
+--- a/mt7915/mcu.c
++++ b/mt7915/mcu.c
+@@ -4039,3 +4039,18 @@ int mt7915_mcu_rf_regval(struct mt7915_d
+ 
+ 	return 0;
+ }
++
++int mt7915_mcu_sw_aci_set(struct mt7915_dev *dev, bool val)
++{
++#define SWLNA_ENABLE 6
++	struct {
++		u32 subcmd;
++		u8 enable;
++	} req = {
++		.subcmd = SWLNA_ENABLE,
++		.enable = val ? 1 : 0,
++	};
++
++	return mt76_mcu_send_msg(&dev->mt76, MCU_EXT_CMD(SWLNA_ACI_CTRL), &req,
++				 sizeof(req), NULL);
++}
+--- a/mt7915/mt7915.h
++++ b/mt7915/mt7915.h
+@@ -522,6 +522,7 @@ int mt7915_mcu_fw_log_2_host(struct mt79
+ int mt7915_mcu_fw_dbg_ctrl(struct mt7915_dev *dev, u32 module, u8 level);
+ void mt7915_mcu_rx_event(struct mt7915_dev *dev, struct sk_buff *skb);
+ void mt7915_mcu_exit(struct mt7915_dev *dev);
++int mt7915_mcu_sw_aci_set(struct mt7915_dev *dev, bool val);
+ 
+ static inline u16 mt7915_wtbl_size(struct mt7915_dev *dev)
+ {

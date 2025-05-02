@@ -1,0 +1,240 @@
+--- a/mt76.h
++++ b/mt76.h
+@@ -33,6 +33,9 @@
+ 
+ #define MT76_TOKEN_FREE_THR	64
+ 
++#define MT76_WED_WDS_MIN    256
++#define MT76_WED_WDS_MAX    272
++
+ #define MT_QFLAG_WED_RING	GENMASK(1, 0)
+ #define MT_QFLAG_WED_TYPE	GENMASK(4, 2)
+ #define MT_QFLAG_WED		BIT(5)
+@@ -78,6 +81,12 @@ enum mt76_wed_type {
+ 	MT76_WED_RRO_Q_IND,
+ };
+ 
++enum mt76_wed_state {
++	MT76_WED_DEFAULT,
++	MT76_WED_ACTIVE,
++	MT76_WED_WDS_ACTIVE,
++};
++
+ struct mt76_bus_ops {
+ 	u32 (*rr)(struct mt76_dev *dev, u32 offset);
+ 	void (*wr)(struct mt76_dev *dev, u32 offset, u32 val);
+@@ -1174,6 +1183,12 @@ void mt76_wed_dma_reset(struct mt76_dev
+ int mt76_wed_net_setup_tc(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 			  struct net_device *netdev, enum tc_setup_type type,
+ 			  void *type_data);
++
++static inline int mt76_wcid_alloc(u32 *mask, int size)
++{
++	return __mt76_wcid_alloc(mask, size, MT76_WED_DEFAULT);
++}
++
+ #ifdef CONFIG_NET_MEDIATEK_SOC_WED
+ u32 mt76_wed_init_rx_buf(struct mtk_wed_device *wed, int size);
+ int mt76_wed_offload_enable(struct mtk_wed_device *wed);
+--- a/mt7915/main.c
++++ b/mt7915/main.c
+@@ -744,9 +744,16 @@ int mt7915_mac_sta_add(struct mt76_dev *
+ 	struct mt7915_sta *msta = (struct mt7915_sta *)sta->drv_priv;
+ 	struct mt7915_vif *mvif = (struct mt7915_vif *)vif->drv_priv;
+ 	bool ext_phy = mvif->phy != &dev->phy;
++	u8 flags = MT76_WED_DEFAULT;
+ 	int idx;
+ 
+-	idx = mt76_wcid_alloc(dev->mt76.wcid_mask, MT7915_WTBL_STA);
++	if (mtk_wed_device_active(&dev->mt76.mmio.wed) &&
++	    !is_mt7915(&dev->mt76)) {
++		flags = test_bit(MT_WCID_FLAG_4ADDR, &msta->wcid.flags) ?
++		       MT76_WED_WDS_ACTIVE : MT76_WED_ACTIVE;
++	}
++
++	idx = __mt76_wcid_alloc(mdev->wcid_mask, MT7915_WTBL_STA, flags);
+ 	if (idx < 0)
+ 		return -ENOSPC;
+ 
+@@ -1271,6 +1278,11 @@ static void mt7915_sta_set_4addr(struct
+ {
+ 	struct mt7915_dev *dev = mt7915_hw_dev(hw);
+ 	struct mt7915_sta *msta = (struct mt7915_sta *)sta->drv_priv;
++	int min = MT76_WED_WDS_MIN, max = MT76_WED_WDS_MAX;
++	struct ieee80211_sta *pre_sta;
++	struct mt7915_sta *pre_msta;
++	u8 flags = MT76_WED_DEFAULT;
++	int tmp_idx;
+ 
+ 	if (enabled)
+ 		set_bit(MT_WCID_FLAG_4ADDR, &msta->wcid.flags);
+@@ -1280,6 +1292,37 @@ static void mt7915_sta_set_4addr(struct
+ 	if (!msta->wcid.sta)
+ 		return;
+ 
++	if (mtk_wed_device_active(&dev->mt76.mmio.wed) &&
++	    !is_mt7915(&dev->mt76) &&
++	    (msta->wcid.idx < min || msta->wcid.idx > max - 1)) {
++		pre_sta = kmemdup(sta, sizeof(*sta) + sizeof(*msta), GFP_KERNEL | __GFP_ZERO);
++		if (!pre_sta)
++			goto error_alloc;
++		pre_msta = (struct mt7915_sta *)pre_sta->drv_priv;
++
++		flags = test_bit(MT_WCID_FLAG_4ADDR, &msta->wcid.flags) ?
++			MT76_WED_WDS_ACTIVE : MT76_WED_ACTIVE;
++
++		tmp_idx = __mt76_wcid_alloc(dev->mt76.wcid_mask, MT7915_WTBL_STA, flags);
++		if (tmp_idx < 0)
++			goto error_wcid;
++		pre_msta->wcid.idx = (u16)tmp_idx;
++		mt7915_mac_sta_add(&dev->mt76, vif, pre_sta);
++		rcu_assign_pointer(dev->mt76.wcid[tmp_idx], &msta->wcid);
++
++		tmp_idx = msta->wcid.idx;
++		msta->wcid.idx = pre_msta->wcid.idx;
++		pre_msta->wcid.idx = (u16)tmp_idx;
++		rcu_assign_pointer(dev->mt76.wcid[tmp_idx], NULL);
++
++		synchronize_rcu();
++		mt7915_mac_sta_remove(&dev->mt76, vif, pre_sta);
++
++error_wcid:
++		kfree(pre_sta);
++	}
++
++error_alloc:
+ 	mt76_connac_mcu_wtbl_update_hdr_trans(&dev->mt76, vif, sta);
+ }
+ 
+@@ -1726,15 +1769,19 @@ mt7915_net_fill_forward_path(struct ieee
+ 	if (!mtk_wed_device_active(wed))
+ 		return -ENODEV;
+ 
+-	if (msta->wcid.idx > 0xff)
++	if (msta->wcid.idx > MT7915_WTBL_STA)
+ 		return -EIO;
+ 
+ 	path->type = DEV_PATH_MTK_WDMA;
+ 	path->dev = ctx->dev;
+ 	path->mtk_wdma.wdma_idx = wed->wdma_idx;
+ 	path->mtk_wdma.bss = mvif->mt76.idx;
+-	path->mtk_wdma.wcid = is_mt7915(&dev->mt76) ? msta->wcid.idx : 0x3ff;
+ 	path->mtk_wdma.queue = phy != &dev->phy;
++	if (test_bit(MT_WCID_FLAG_4ADDR, &msta->wcid.flags) ||
++	    is_mt7915(&dev->mt76))
++		path->mtk_wdma.wcid = msta->wcid.idx;
++	else
++		path->mtk_wdma.wcid = 0x3ff;
+ 
+ 	ctx->dev = NULL;
+ 
+--- a/mt7915/mcu.c
++++ b/mt7915/mcu.c
+@@ -2403,10 +2403,20 @@ int mt7915_mcu_init_firmware(struct mt79
+ 
+ 	mt76_connac_mcu_del_wtbl_all(&dev->mt76);
+ 
+-	if ((mtk_wed_device_active(&dev->mt76.mmio.wed) &&
+-	     is_mt7915(&dev->mt76)) ||
+-	    !mtk_wed_get_rx_capa(&dev->mt76.mmio.wed))
+-		mt7915_mcu_wa_cmd(dev, MCU_WA_PARAM_CMD(CAPABILITY), 0, 0, 0);
++#if IS_ENABLED(CONFIG_NET_MEDIATEK_SOC_WED)
++	if (mtk_wed_device_active(&dev->mt76.mmio.wed)) {
++		if (is_mt7915(&dev->mt76) ||
++		    !mtk_wed_get_rx_capa(&dev->mt76.mmio.wed))
++			ret = mt7915_mcu_wa_cmd(dev, MCU_WA_PARAM_CMD(CAPABILITY),
++						0, 0, 0);
++		else
++			ret = mt7915_mcu_wa_cmd(dev, MCU_WA_PARAM_CMD(SET),
++						MCU_WA_PARAM_WED_VERSION,
++						dev->mt76.mmio.wed.rev_id, 0);
++		if (ret)
++			return ret;
++	}
++#endif
+ 
+ 	ret = mt7915_mcu_set_mwds(dev, 1);
+ 	if (ret)
+--- a/mt7915/mcu.h
++++ b/mt7915/mcu.h
+@@ -278,6 +278,7 @@ enum {
+ 	MCU_WA_PARAM_PDMA_RX = 0x04,
+ 	MCU_WA_PARAM_CPU_UTIL = 0x0b,
+ 	MCU_WA_PARAM_RED = 0x0e,
++	MCU_WA_PARAM_WED_VERSION = 0x32,
+ 	MCU_WA_PARAM_RED_SETTING = 0x40,
+ };
+ 
+--- a/util.c
++++ b/util.c
+@@ -42,8 +42,10 @@ bool ____mt76_poll_msec(struct mt76_dev
+ }
+ EXPORT_SYMBOL_GPL(____mt76_poll_msec);
+ 
+-int mt76_wcid_alloc(u32 *mask, int size)
++int __mt76_wcid_alloc(u32 *mask, int size, u8 flag)
+ {
++	int max = MT76_WED_WDS_MAX;
++	int min = MT76_WED_WDS_MIN;
+ 	int i, idx = 0, cur;
+ 
+ 	for (i = 0; i < DIV_ROUND_UP(size, 32); i++) {
+@@ -53,16 +55,45 @@ int mt76_wcid_alloc(u32 *mask, int size)
+ 
+ 		idx--;
+ 		cur = i * 32 + idx;
+-		if (cur >= size)
++
++		switch (flag) {
++		case MT76_WED_ACTIVE:
++			if (cur >= min && cur < max)
++				continue;
++
++			if (cur >= size) {
++				u32 end = max - min - 1;
++
++				i = min / 32;
++				idx = ffs(~mask[i] & GENMASK(end, 0));
++				if (!idx)
++					goto error;
++				idx--;
++				cur = min + idx;
++			}
++
++			break;
++		case MT76_WED_WDS_ACTIVE:
++			if (cur < min)
++				continue;
++			if (cur >= max)
++				goto error;
++
++			break;
++		default:
++			if (cur >= size)
++				goto error;
+ 			break;
++		}
+ 
+ 		mask[i] |= BIT(idx);
+ 		return cur;
+ 	}
+ 
++error:
+ 	return -1;
+ }
+-EXPORT_SYMBOL_GPL(mt76_wcid_alloc);
++EXPORT_SYMBOL_GPL(__mt76_wcid_alloc);
+ 
+ int mt76_get_min_avg_rssi(struct mt76_dev *dev, u8 phy_idx)
+ {
+--- a/util.h
++++ b/util.h
+@@ -27,7 +27,7 @@ enum {
+ #define MT76_INCR(_var, _size) \
+ 	(_var = (((_var) + 1) % (_size)))
+ 
+-int mt76_wcid_alloc(u32 *mask, int size);
++int __mt76_wcid_alloc(u32 *mask, int size, u8 flags);
+ 
+ static inline void
+ mt76_wcid_mask_set(u32 *mask, int idx)

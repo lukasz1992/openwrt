@@ -1,0 +1,26 @@
+--- a/mt7915/main.c
++++ b/mt7915/main.c
+@@ -1753,6 +1753,15 @@ mt7915_reconfig_complete(struct ieee8021
+ 				     MT7915_WATCHDOG_TIME);
+ }
+ 
++static void mt7915_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
++			 u32 queues, bool drop)
++{
++	struct mt7915_dev *dev = mt7915_hw_dev(hw);
++
++	wait_event_timeout(dev->mt76.tx_wait, !mt76_has_tx_pending(&dev->mphy),
++			   HZ / 2);
++}
++
+ const struct ieee80211_ops mt7915_ops = {
+ 	.add_chanctx = ieee80211_emulate_add_chanctx,
+ 	.remove_chanctx = ieee80211_emulate_remove_chanctx,
+@@ -1774,6 +1783,7 @@ const struct ieee80211_ops mt7915_ops =
+ 	.link_sta_rc_update = mt7915_sta_rc_update,
+ 	.set_key = mt7915_set_key,
+ 	.ampdu_action = mt7915_ampdu_action,
++	.flush = mt7915_flush,
+ 	.set_rts_threshold = mt7915_set_rts_threshold,
+ 	.wake_tx_queue = mt76_wake_tx_queue,
+ 	.sw_scan_start = mt76_sw_scan,

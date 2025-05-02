@@ -1,0 +1,70 @@
+commit 7757e7c140f7250cb1f62000421c6d788372f7b7
+Author: Johannes Berg <johannes.berg@intel.com>
+Date:   Mon Oct 7 15:00:54 2024 +0300
+
+    wifi: mac80211: call rate_control_rate_update() for link STA
+    
+    In order to update the right link information, call the update
+    rate_control_rate_update() with the right link_sta, and then
+    pass that through to the driver's sta_rc_update() method. The
+    software rate control still doesn't support it, but that'll be
+    skipped by not having a rate control ref.
+    
+    Since it now operates on a link sta, rename the driver method.
+    
+    Signed-off-by: Johannes Berg <johannes.berg@intel.com>
+    Signed-off-by: Miri Korenblit <miriam.rachel.korenblit@intel.com>
+    Link: https://patch.msgid.link/20241007144851.5851b6b5fd41.Ibdf50d96afa4b761dd9b9dfd54a1147e77a75329@changeid
+    Signed-off-by: Johannes Berg <johannes.berg@intel.com>
+
+diff --git b/mt7915/main.c a/mt7915/main.c
+index 3aa31c5c..58e0a85f 100644
+--- b/mt7915/main.c
++++ a/mt7915/main.c
+@@ -1224,10 +1224,9 @@ static void mt7915_sta_rc_work(void *data, struct ieee80211_sta *sta)
+ 
+ static void mt7915_sta_rc_update(struct ieee80211_hw *hw,
+ 				 struct ieee80211_vif *vif,
+-				 struct ieee80211_link_sta *link_sta,
++				 struct ieee80211_sta *sta,
+ 				 u32 changed)
+ {
+-	struct ieee80211_sta *sta = link_sta->sta;
+ 	struct mt7915_phy *phy = mt7915_hw_phy(hw);
+ 	struct mt7915_dev *dev = phy->dev;
+ 	struct mt7915_sta *msta = (struct mt7915_sta *)sta->drv_priv;
+@@ -1771,7 +1770,7 @@ const struct ieee80211_ops mt7915_ops = {
+ 	.stop_ap = mt7915_stop_ap,
+ 	.sta_state = mt76_sta_state,
+ 	.sta_pre_rcu_remove = mt76_sta_pre_rcu_remove,
+-	.link_sta_rc_update = mt7915_sta_rc_update,
++	.sta_rc_update = mt7915_sta_rc_update,
+ 	.set_key = mt7915_set_key,
+ 	.ampdu_action = mt7915_ampdu_action,
+ 	.set_rts_threshold = mt7915_set_rts_threshold,
+diff --git b/mt7996/main.c a/mt7996/main.c
+index 2923bd53..2f31a4ae 100644
+--- b/mt7996/main.c
++++ a/mt7996/main.c
+@@ -1491,11 +1491,10 @@ static void mt7996_sta_rc_work(void *data, struct ieee80211_sta *sta)
+ 
+ static void mt7996_link_sta_rc_update(struct ieee80211_hw *hw,
+ 				      struct ieee80211_vif *vif,
+-				      struct ieee80211_link_sta *link_sta,
++				      struct ieee80211_sta *sta,
+ 				      u32 changed)
+ {
+ 	struct mt7996_dev *dev = mt7996_hw_dev(hw);
+-	struct ieee80211_sta *sta = link_sta->sta;
+ 
+ 	mt7996_link_rate_ctrl_update(&changed, sta);
+ 	ieee80211_queue_work(hw, &dev->rc_work);
+@@ -1939,7 +1938,7 @@ const struct ieee80211_ops mt7996_ops = {
+ 	.link_info_changed = mt7996_link_info_changed,
+ 	.sta_state = mt7996_sta_state,
+ 	.sta_pre_rcu_remove = mt76_sta_pre_rcu_remove,
+-	.link_sta_rc_update = mt7996_link_sta_rc_update,
++	.sta_rc_update = mt7996_link_sta_rc_update,
+ 	.set_key = mt7996_set_key,
+ 	.ampdu_action = mt7996_ampdu_action,
+ 	.set_rts_threshold = mt7996_set_rts_threshold,
