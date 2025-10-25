@@ -163,6 +163,10 @@
 };
 
 &spi_nand {
+	econet,bmt;
+	econet,assert-reserve-size = <16>;
+	econet,enable-airoha-compat;
+
 	#address-cells = <1>;
 	#size-cells = <1>;
 	partitions {
