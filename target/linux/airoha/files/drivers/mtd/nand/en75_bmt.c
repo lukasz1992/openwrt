@@ -106,6 +106,21 @@
  *   blocks. If econet,can-write-factory-bbt is set, this will overwrite the
  *   BBT with the specified bad blocks.
  *
+ * - econet,enable-airoha-compat;
+ *   Enables compatibility with Airoha BMT on-disk format. When set, the
+ *   driver will follow these behaviors:
+ *   1) Use a new `bmt_checksum_airoha` function that calculates the BMT
+ *      checksum over a range determined by the reserve pool size, mirroring
+ *      the Airoha driver's logic.
+ *   2) Interpret bad block markers in a manner consistent with the Airoha
+ *      driver, where any non-0xff value in the first two OOB bytes
+ *      indicates a bad block.
+ *   3) The reserve area calculation remains the same, as both drivers use
+ *       a similar method of reserving a percentage of total blocks.
+ *   This logic is encapsulated in new functions (`bmt_checksum_airoha`,
+ *   `try_parse_bmt_airoha`) to keep the core driver logic clean and
+ *   separate from the compatibility layer.
+ *
  * Copyright (C) 2025 Caleb James DeLisle <cjd@cjdns.fr>
  */
 
@@ -150,6 +165,7 @@ const char *name_can_write_factory_bbt	= "econet,can-write-factory-bbt";
 const char *name_factory_badblocks	= "econet,factory-badblocks";
 const char *name_enable_remap		= "econet,enable-remap";
 const char *name_assert_reserve_size	= "econet,assert-reserve-size";
+const char *name_enable_airoha_compat	= "econet,enable-airoha-compat";
 
 /* To promote readability, most functions must have their inputs passed in. */
 #define bmtd dont_directly_reference_mtk_bmtd
@@ -276,11 +292,18 @@ struct en75_bmt_m {
 
 	/* Unless set, fail any attempt to write the BBT. */
 	s8 can_write_factory_bbt;
+
+	/* If set, use Airoha-compatible logic. */
+	s8 is_airoha_compat;
 };
 
 /*
  * In-memory functions (do not read or write)
  */
+static int reserve_block_count(const struct en75_bmt_m *ctx)
+{
+	return ctx->mtk->total_blks - ctx->reserve_area_begin;
+}
 
 static u16 bbt_checksum(const struct bbt_table *bbt)
 {
@@ -309,9 +332,21 @@ static u8 bmt_checksum(const struct bmt_table *bmt, int check_entries)
 	return checksum;
 }
 
-static int reserve_block_count(const struct en75_bmt_m *ctx)
+static u8 bmt_checksum_airoha(const struct en75_bmt_m *ctx, const struct bmt_table *bmt)
 {
-	return ctx->mtk->total_blks - ctx->reserve_area_begin;
+	int length;
+	const u8 *data;
+	u8 checksum;
+	int check_entries = reserve_block_count(ctx);
+
+	WARN_ON_ONCE(check_entries > MAX_BMT_SIZE);
+	length = min(check_entries, MAX_BMT_SIZE) * sizeof(bmt->table[0]);
+	data = (u8 *)&bmt->table;
+	checksum = bmt->header.version + bmt->header.size;
+	for (int i = 0; i < length; i++)
+		checksum += data[i];
+
+	return checksum;
 }
 
 /* return a block_info or error pointer */
@@ -556,8 +591,10 @@ static int w_sync_tables(struct en75_bmt_m *ctx)
 		rblocks = reserve_block_count(ctx);
 		for (int i = ctx->bmt.header.size; i < rblocks; i++)
 			ctx->bmt.table[i] = (struct bmt_entry){ 0 };
-		ctx->bmt.header.checksum =
-			bmt_checksum(&ctx->bmt, ctx->bmt.header.size);
+		if (ctx->is_airoha_compat)
+			ctx->bmt.header.checksum = bmt_checksum_airoha(ctx, &ctx->bmt);
+		else
+			ctx->bmt.header.checksum = bmt_checksum(&ctx->bmt, ctx->bmt.header.size);
 		new_bmt_block = w_update_table(
 			ctx,
 			true,
@@ -813,10 +850,13 @@ enum block_is_bad {
 	BB_UNKNOWN_BAD,
 };
 
-static enum block_is_bad fdm_is_bad(u8 fdm[static 4])
+static enum block_is_bad fdm_is_bad(u8 fdm[static 4], bool is_airoha_compat)
 {
 	if (fdm[0] == 0xff && fdm[1] == 0xff)
 		return BB_GOOD;
+	/* Airoha considers any non-ff in first two bytes as bad */
+	if (is_airoha_compat)
+		return BB_FACTORY_BAD;
 	if (fdm[0] == BLOCK_WORN_MARK)
 		return BB_WORN;
 	if (fdm[0] == 0x00 || fdm[1] == 0x00)
@@ -858,7 +898,7 @@ static void r_reconstruct_bmt(struct en75_bmt_m *ctx)
 		ret = bbt_nand_read(blk_pg(i),
 				    ctx->mtk->data_buf, ctx->mtk->pg_size,
 				    fdm, sizeof(fdm));
-		if (ret < 0 || fdm_is_bad(fdm))
+		if (ret < 0 || fdm_is_bad(fdm, ctx->is_airoha_compat))
 			continue;
 
 		/* Vendor firmware uses host order. */
@@ -907,7 +947,7 @@ static int r_reconstruct_bbt(struct bbt_table *bbt_out, const struct en75_bmt_m 
 				    ctx->mtk->data_buf, ctx->mtk->pg_size,
 				    fdm, sizeof(fdm));
 		if (!ret) {
-			enum block_is_bad status = fdm_is_bad(fdm);
+			enum block_is_bad status = fdm_is_bad(fdm, ctx->is_airoha_compat);
 
 			if (status == BB_GOOD || status == BB_WORN)
 				continue;
@@ -982,6 +1022,34 @@ static int try_parse_bmt(struct bmt_table *out, u8 *buf, int len)
 	return 0;
 }
 
+static int try_parse_bmt_airoha(struct bmt_table *out, u8 *buf, int len)
+{
+	static struct bmt_table workspace;
+
+	if (len < sizeof(*out))
+		return -EINVAL;
+
+	memcpy(&workspace, buf, sizeof(workspace));
+
+	if (strncmp(workspace.header.signature, "BMT", 3))
+		return -EINVAL;
+
+	/*
+	 * Checksum cannot be validated here because reserve area is not yet
+	 * known. It will be validated later in w_init.
+	 */
+	memcpy(out, &workspace, sizeof(workspace));
+	return 0;
+}
+
+static int validate_bmt_airoha(struct en75_bmt_m *ctx)
+{
+	if (ctx->bmt.header.checksum == bmt_checksum_airoha(ctx, &ctx->bmt))
+		return 0;
+
+	return -EINVAL;
+}
+
 static int r_scan_reserve(struct en75_bmt_m *ctx)
 {
 	u16 total_blks = ctx->mtk->total_blks;
@@ -1019,7 +1087,7 @@ static int r_scan_reserve(struct en75_bmt_m *ctx)
 			.status = BS_INVALID
 		};
 
-		if (ret || fdm_is_bad(fdm)) {
+		if (ret || fdm_is_bad(fdm, ctx->is_airoha_compat)) {
 			pr_info("%s: skipping bad block %d in reserve area\n", log_pfx, cursor);
 			bif.status = BS_BAD;
 		} else if (fdm_is_mapped(fdm)) {
@@ -1028,7 +1096,9 @@ static int r_scan_reserve(struct en75_bmt_m *ctx)
 		} else if (!try_parse_bbt(&ctx->bbt, data_buf, pg_size)) {
 			pr_info("%s: found BBT in block %d\n", log_pfx, cursor);
 			bif.status = BS_BBT;
-		} else if (!try_parse_bmt(&ctx->bmt, data_buf, pg_size)) {
+		} else if (ctx->is_airoha_compat ?
+			   !try_parse_bmt_airoha(&ctx->bmt, data_buf, pg_size) :
+			   !try_parse_bmt(&ctx->bmt, data_buf, pg_size)) {
 			pr_info("%s: found BMT in block %d\n", log_pfx, cursor);
 			bif.status = BS_BMT;
 		} else if (block_is_erased(data_buf, pg_size, fdm, sizeof(fdm))) {
@@ -1197,9 +1267,20 @@ static int w_init(struct en75_bmt_m *ctx, struct device_node *np)
 	int assert_reserve_size = -1;
 	int ret;
 
+	if (of_property_read_bool(np, name_enable_airoha_compat))
+		ctx->is_airoha_compat = 1;
+
 	ret = r_scan_reserve(ctx);
 	if (ret)
 		return ret;
+
+	if (ctx->is_airoha_compat && ctx->bmt.header.version) {
+		if (validate_bmt_airoha(ctx)) {
+			pr_info("%s: Airoha BMT checksum invalid\n", log_pfx);
+			/* Invalidate BMT so it gets reconstructed */
+			ctx->bmt.header.version = 0;
+		}
+	}
 
 	if (!of_property_read_u32(np, name_assert_reserve_size, &assert_reserve_size)) {
 		if (assert_reserve_size != reserve_block_count(ctx)) {
