@@ -123,6 +123,13 @@
 		};
 	};
 
+	pcie2_rst_pins: pcie2-rst-pins {
+		conf {
+			pins = "pcie_reset2";
+			drive-open-drain = <1>;
+		};
+	};
+
 	uart2_pins: uart2-pins {
 		mux {
 			function = "uart";
@@ -273,6 +280,13 @@
 	};
 };
 
+&pcie2 {
+	status = "okay";
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcie2_rst_pins>;
+};
+
 &npu {
 	status = "okay";
 };
@@ -373,4 +387,10 @@
 	status = "okay";
 	pinctrl-names = "default";
 	pinctrl-0 = <&hsuart_pins>;
+};
+
+&scuclk {
+	airoha,serdes-wifi1 = "pcie0_x2";
+	airoha,serdes-wifi2 = "pcie0_x2";
+	airoha,serdes-usb2 = "pcie2_x1";
 };
