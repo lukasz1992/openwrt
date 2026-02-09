@@ -1,0 +1,45 @@
+From 0e089caf8a742685c99e52f0f6d1f299def6acf0 Mon Sep 17 00:00:00 2001
+From: Ziyi Guo <n7l8m4@u.northwestern.edu>
+Date: Sat, 31 Jan 2026 03:52:10 +0000
+Subject: [PATCH 6/7] wifi: mt76: add missing lock protection in mt76_sta_state
+ for sta_event callback
+
+mt76_sta_state() calls the sta_event callback without holding dev->mutex.
+However, mt7915_mac_sta_event() (MT7915 implementation of this callback)
+calls mt7915_mac_twt_teardown_flow() which has
+lockdep_assert_held(&dev->mt76.mutex) indicating that callers must
+hold this lock.
+
+The locking pattern in mt76_sta_state() is inconsistent:
+- mt76_sta_add() acquires dev->mutex before calling dev->drv->sta_add
+- mt76_sta_remove() acquires dev->mutex before calling __mt76_sta_remove
+- But sta_event callback is called without acquiring the lock
+
+Add mutex_lock()/mutex_unlock() around the mt7915_mac_twt_teardown_flow
+invocation to fix the missing lock protection and maintain consistency
+with the existing locking pattern.
+
+Signed-off-by: Ziyi Guo <n7l8m4@u.northwestern.edu>
+---
+ mt7996/main.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/mt7996/main.c b/mt7996/main.c
+index a9b988b8..c005fa31 100644
+--- a/mt7996/main.c
++++ b/mt7996/main.c
+@@ -1295,9 +1295,11 @@ mt7996_mac_sta_event(struct mt7996_dev *dev, struct ieee80211_vif *vif,
+ 				goto unlock;
+ 			break;
+ 		case MT76_STA_EVENT_DISASSOC:
++			mutex_lock(&dev->mt76.mutex);
+ 			for (i = 0; i < ARRAY_SIZE(msta_link->twt.flow); i++)
+ 				mt7996_mac_twt_teardown_flow(dev, link,
+ 							     msta_link, i);
++			mutex_unlock(&dev->mt76.mutex);
+ 
+ 			if (!sta->mlo)
+ 				mt7996_mcu_add_sta(dev, link_conf, link_sta,
+-- 
+2.47.3
+
