@@ -5,6 +5,9 @@ CPU_TYPE:=cortex-a53
 KERNELNAME:=Image dtbs
 FEATURES+=pwm source-only
 
+DEFAULT_PACKAGES += \
+	uboot-envtools
+
 define Target/Description
 	Build firmware images for Airoha an7581 ARM based boards.
 endef
