@@ -1,0 +1,108 @@
+diff --git a/device.c b/device.c
+index 8364754..300d919 100644
+--- a/device.c
++++ b/device.c
+@@ -134,19 +134,2 @@ int device_vlan_get_output(struct device *dev, int vid)
+ 
+-bool device_vlan_state_forwarding(struct device *dev, int vid)
+-{
+-	int i;
+-
+-	if (!dev->vlan)
+-		return true;
+-
+-	for (i = 0; i < dev->n_vlans; i++) {
+-		if (vid != dev->vlan[i].id)
+-			continue;
+-
+-		return dev->vlan[i].forwarding;
+-	}
+-
+-	return false;
+-}
+-
+ bool device_vlan_has_tunnel(struct device *dev, int vid)
+diff --git a/device.h b/device.h
+index fb80aad..eb5b8ff 100644
+--- a/device.h
++++ b/device.h
+@@ -69,3 +69,2 @@ struct vlan {
+ 			uint16_t tunnel : 1;
+-			uint16_t forwarding : 1;
+ 		};
+@@ -111,3 +110,2 @@ int device_vlan_get_input(struct device *dev, uint16_t xdp_vlan);
+ int device_vlan_get_output(struct device *dev, int vid);
+-bool device_vlan_state_forwarding(struct device *dev, int vid);
+ bool device_vlan_has_tunnel(struct device *dev, int vid);
+diff --git a/flow.c b/flow.c
+index a71d136..6601d5e 100644
+--- a/flow.c
++++ b/flow.c
+@@ -138,8 +138,2 @@ void bridger_check_pending_flow(struct bridger_flow_key *key,
+ 
+-	if (!device_vlan_state_forwarding(fdb_in->dev, fkey.vlan))
+-		return;
+-
+-	if (!device_vlan_state_forwarding(fdb_out->dev, fkey.vlan))
+-		return;
+-
+ 	if (!fdb_in->dev->port_forwarding || !fdb_out->dev->port_forwarding)
+diff --git a/nl.c b/nl.c
+index 906bb04..faa6377 100644
+--- a/nl.c
++++ b/nl.c
+@@ -51,3 +51,2 @@ newlink_add_vlan(struct device *dev, const struct bridge_vlan_info *vinfo,
+ 	v->pvid = !!(vinfo->flags & BRIDGE_VLAN_INFO_PVID);
+-	v->forwarding = 1;
+ 	if (v->pvid)
+@@ -265,44 +264,2 @@ handle_dellink(struct nlmsghdr *nh)
+ 
+-static void
+-handle_vlan(struct nlmsghdr *nh)
+-{
+-	struct br_vlan_msg *bvm = NLMSG_DATA(nh);
+-	struct nlattr *tb[BRIDGE_VLANDB_MAX + 1];
+-	struct nlattr *tb_entry[BRIDGE_VLANDB_ENTRY_MAX + 1];
+-	struct device *dev;
+-	uint16_t vid;
+-	uint8_t state;
+-	bool forwarding;
+-	int i;
+-
+-	nlmsg_parse(nh, sizeof(struct br_vlan_msg), tb, BRIDGE_VLANDB_MAX, NULL);
+-	if (!tb[BRIDGE_VLANDB_ENTRY])
+-		return;
+-
+-	dev = device_get(bvm->ifindex);
+-	if (!dev || !dev->vlan)
+-		return;
+-
+-	nla_parse_nested(tb_entry, BRIDGE_VLANDB_ENTRY_MAX, tb[BRIDGE_VLANDB_ENTRY], NULL);
+-	if (!tb_entry[BRIDGE_VLANDB_ENTRY_INFO])
+-		return;
+-
+-	vid = nla_get_u16(tb_entry[BRIDGE_VLANDB_ENTRY_INFO]);
+-
+-	if (tb_entry[BRIDGE_VLANDB_ENTRY_STATE])
+-		state = nla_get_u8(tb_entry[BRIDGE_VLANDB_ENTRY_STATE]);
+-	else
+-		state = BR_STATE_FORWARDING;
+-
+-	forwarding = (state == BR_STATE_FORWARDING);
+-
+-	for (i = 0; i < dev->n_vlans; i++) {
+-		if (dev->vlan[i].id == vid) {
+-			dev->vlan[i].forwarding = forwarding;
+-			D("Update vlan %d state=%d on device %s\n",
+-			  vid, state, dev->ifname);
+-			break;
+-		}
+-	}
+-}
+ 
+@@ -474,5 +431,2 @@ bridger_nl_event_cb(struct nl_msg *msg, void *arg)
+ 		break;
+-	case RTM_NEWVLAN:
+-		handle_vlan(nh);
+-		break;
+ 	case RTM_NEWNEIGH:
