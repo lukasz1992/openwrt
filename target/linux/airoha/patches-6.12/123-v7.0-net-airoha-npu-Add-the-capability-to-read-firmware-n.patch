@@ -110,7 +110,7 @@ index a56b3780bb627c..89f22f3f47dc56 100644
  }
  
  static irqreturn_t airoha_npu_mbox_handler(int irq, void *npu_instance)
-@@ -790,6 +822,8 @@ module_platform_driver(airoha_npu_driver);
+@@ -797,6 +829,8 @@ module_platform_driver(airoha_npu_driver
  
  MODULE_FIRMWARE(NPU_EN7581_FIRMWARE_DATA);
  MODULE_FIRMWARE(NPU_EN7581_FIRMWARE_RV32);
