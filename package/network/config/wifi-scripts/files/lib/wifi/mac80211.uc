@@ -56,6 +56,8 @@ for (let phy_name, phy in board.wlan) {
 		let width = band.max_width;
 		if (band_name == "2G")
 			width = 20;
+		else if (band_name == "6G")
+			width = 160;
 		else if (width > 80)
 			width = 80;
 
