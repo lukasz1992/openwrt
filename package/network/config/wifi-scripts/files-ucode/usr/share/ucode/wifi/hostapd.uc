@@ -448,8 +448,20 @@ function device_htmode_append(config) {
 		config.ieee80211be = true;
 		append_vars(config, [ 'ieee80211be' ]);
 
+		config.eht_su_beamformer = true;
+		config.eht_su_beamformee = true;
+		config.eht_mu_beamformer = true;
+		if (!(eht_phy_cap[0] & 0x20))
+			config.eht_su_beamformer = false;
+		if (!(eht_phy_cap[0] & 0x40))
+			config.eht_su_beamformee = false;
+		if (!(eht_phy_cap[7] & 0x70))
+			config.eht_mu_beamformer = false;
+
 		if (config.hw_mode == 'a')
-			append_vars(config, [ 'eht_oper_chwidth', 'eht_oper_centr_freq_seg0_idx' ]);
+			append_vars(config, [ 'eht_oper_chwidth', 'eht_oper_centr_freq_seg0_idx',
+				'eht_su_beamformer', 'config.eht_su_beamformee', 'config.eht_mu_beamformer'
+			]);
 	}
 
 	append_vars(config, [ 'tx_queue_data2_burst', 'stationary_ap' ]);
