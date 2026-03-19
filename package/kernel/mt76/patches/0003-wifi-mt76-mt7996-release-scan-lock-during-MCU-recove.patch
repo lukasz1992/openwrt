@@ -1,0 +1,32 @@
+MCU reset during an active scan leaves mac80211's scan lock held
+blocking all future scan requests.
+
+Also clear stale MCU reset bits when recovery returns to normal.
+
+Signed-off-by: Chad Monroe <chad@monroe.io>
+diff --git a/mt7996/mac.c b/mt7996/mac.c
+index d617e5fe..c3ad94ca 100644
+--- a/mt7996/mac.c
++++ b/mt7996/mac.c
+@@ -2496,8 +2496,20 @@ void mt7996_mac_reset_work(struct work_struct *work)
+ 		return;
+ 	}
+ 
+-	if (!(READ_ONCE(dev->recovery.state) & MT_MCU_CMD_STOP_DMA))
++	if (!(READ_ONCE(dev->recovery.state) & MT_MCU_CMD_STOP_DMA)) {
++		u32 state = READ_ONCE(dev->recovery.state);
++
++		if (test_bit(MT76_MCU_RESET, &dev->mphy.state) &&
++		    (state & MT_MCU_CMD_NORMAL_STATE)) {
++			clear_bit(MT76_MCU_RESET, &dev->mphy.state);
++			mt7996_for_each_phy(dev, phy)
++				clear_bit(MT76_RESET, &phy->mt76->state);
++			dev_info(dev->mt76.dev,
++				 "%s cleared stale MCU reset bit after recovery state normal (0x%08x)\n",
++				 wiphy_name(dev->mt76.hw->wiphy), state);
++		}
+ 		return;
++	}
+ 
+ 	dev_info(dev->mt76.dev,"\n%s L1 SER recovery start.",
+ 		 wiphy_name(hw->wiphy));
