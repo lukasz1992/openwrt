@@ -1,0 +1,27 @@
+Full reset acquires mutex before aborting scan, but scan_work needs
+that mutex for mt76_set_channel(). Deadlock occurs when
+ieee80211_restart_hw() waits for scan completion.
+
+Mirror L1 SER ordering: abort scan/ROC before mutex acquisition.
+
+Signed-off-by: Chad Monroe <chad@monroe.io>
+diff --git a/mt7996/mac.c b/mt7996/mac.c
+index c3ad94ca..e4fc6fc2 100644
+--- a/mt7996/mac.c
++++ b/mt7996/mac.c
+@@ -2413,8 +2413,14 @@ mt7996_mac_full_reset(struct mt7996_dev *dev)
+ 	ieee80211_stop_queues(hw);
+ 
+ 	cancel_work_sync(&dev->wed_rro.work);
+-	mt7996_for_each_phy(dev, phy)
++
++	set_bit(MT76_MCU_RESET, &dev->mphy.state);
++	mt76_abort_scan(&dev->mt76);
++	mt7996_for_each_phy(dev, phy) {
++		mt76_abort_roc(phy->mt76);
++		set_bit(MT76_RESET, &phy->mt76->state);
+ 		cancel_delayed_work_sync(&phy->mt76->mac_work);
++	}
+ 
+ 	mt76_abort_scan(&dev->mt76);
+ 
