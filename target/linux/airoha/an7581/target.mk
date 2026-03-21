@@ -6,7 +6,7 @@ KERNELNAME:=Image dtbs
 FEATURES+=pwm source-only
 
 DEFAULT_PACKAGES += \
-	uboot-envtools
+	uboot-envtools kmod-br-netfilter
 
 define Target/Description
 	Build firmware images for Airoha an7581 ARM based boards.
