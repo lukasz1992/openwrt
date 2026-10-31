@@ -51,3 +51,17 @@ define Package/airoha-an7583-npu-firmware/install
 endef
 
 $(eval $(call BuildPackage,airoha-an7583-npu-firmware))
+
+
+Package/airoha-an7552-npu-firmware = $(call Package/firmware-default,Airoha AN7552 NPU firmware,,LICENSE.airoha)
+define Package/airoha-an7552-npu-firmware/install
+	$(INSTALL_DIR) $(1)/lib/firmware/airoha
+	$(CP) \
+		$(PKG_BUILD_DIR)/airoha/an7552_npu_data.bin \
+		$(1)/lib/firmware/airoha/an7552_npu_data.bin
+	$(CP) \
+		$(PKG_BUILD_DIR)/airoha/an7552_npu_rv32.bin \
+		$(1)/lib/firmware/airoha/an7552_npu_rv32.bin
+endef
+
+$(eval $(call BuildPackage,airoha-an7552-npu-firmware))

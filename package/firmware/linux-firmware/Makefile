@@ -35,6 +35,11 @@ define Package/firmware-default
   $(if $(5),PKGFLAGS:=$(5))
 endef
 
+define Build/Prepare
+	$(call Build/Prepare/Default)
+	$(if $(wildcard ./src/*),$(CP) ./src/* $(PKG_BUILD_DIR)/)
+endef
+
 define Build/Compile
 
 endef
