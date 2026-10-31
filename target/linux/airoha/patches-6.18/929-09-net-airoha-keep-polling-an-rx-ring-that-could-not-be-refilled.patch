@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lukasz M <lukasz1992@localhost>
+Date: Sat, 31 Oct 2026 12:00:00 +0100
+Subject: [PATCH] net airoha keep polling an rx ring that could not be refilled
+
+airoha_qdma_fill_rx_queue() stops at the first failed page_pool
+allocation and the ring is only refilled from the RX NAPI poll.  Under
+memory pressure a ring can run down to no buffer at all: the QDMA then
+drops every frame for it, raises no RX done interrupt, the poll is never
+scheduled again and the ring stays dead until the driver is reloaded.
+Seen as a possibility in review, not on hardware.
+
+When the poll ends with an empty ring, return the full budget so NAPI
+polls again and the refill is retried; the frames that come meanwhile
+are lost as before, but the ring recovers once memory is back.
+
+Signed-off-by: Lukasz M <lukasz1992@localhost>
+---
+--- a/drivers/net/ethernet/airoha/airoha_eth.c
++++ b/drivers/net/ethernet/airoha/airoha_eth.c
+@@ -1197,6 +1197,15 @@ static int airoha_qdma_rx_napi_poll(stru
+ 		done += cur;
+ 	} while (cur && done < budget);
+ 
++	/*
++	 * Not a single buffer could be given back to the ring (page_pool
++	 * out of memory): the QDMA has nowhere to put a frame, so no RX
++	 * interrupt will come to schedule the refill.  Stay scheduled, the
++	 * next poll tries again.
++	 */
++	if (!q->queued)
++		return budget;
++
+ 	if (done < budget && napi_complete(napi)) {
+ 		struct airoha_qdma *qdma = q->qdma;
+ 		int i, qid = q - &qdma->q_rx[0];
